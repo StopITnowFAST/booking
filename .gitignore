@@ -50,3 +50,9 @@
 
 # Embedded web-server pid file
 /.web-server-pid
+
+# Local env (use .env.example on the server)
+/.env
+/.env.local
+/.env.*.local
+!/.env.example

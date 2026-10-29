@@ -10,7 +10,8 @@ RUN composer install \
     --no-scripts \
     --no-interaction \
     --prefer-dist \
-    --optimize-autoloader
+    --optimize-autoloader \
+    --ignore-platform-req=ext-amqp
 
 COPY . .
 RUN composer dump-autoload --optimize --classmap-authoritative --no-dev \
@@ -18,6 +19,9 @@ RUN composer dump-autoload --optimize --classmap-authoritative --no-dev \
 
 
 FROM php:8.3-fpm-bookworm AS app
+
+# Local tarball avoids flaky pecl.php.net channel lookups during build.
+COPY docker/php/ext/amqp-2.2.0.tgz /tmp/amqp-2.2.0.tgz
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nginx \
@@ -28,8 +32,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl-dev \
         $PHPIZE_DEPS \
     && docker-php-ext-install -j$(nproc) pdo_pgsql opcache \
-    && pecl install amqp \
+    && pecl install /tmp/amqp-2.2.0.tgz \
     && docker-php-ext-enable amqp \
+    && rm -f /tmp/amqp-2.2.0.tgz \
     && apt-get purge -y --auto-remove $PHPIZE_DEPS \
     && rm -rf /var/lib/apt/lists/*
 
@@ -39,6 +44,10 @@ COPY --from=vendor /app /var/www/html
 COPY docker/nginx/default.conf /etc/nginx/sites-available/default
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/app.ini
 COPY docker/app/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# .env is dockerignored (secrets stay on the host via compose env_file).
+# Symfony still requires a .env file on disk; real values come from the container env.
+RUN if [ ! -f .env ]; then cp .env.example .env; fi
 
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
     && rm -f /etc/nginx/sites-enabled/default \

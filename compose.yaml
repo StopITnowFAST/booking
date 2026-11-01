@@ -1,3 +1,7 @@
+# Production / VPS base stack.
+# Local PC: copy compose.override.yaml.example → compose.override.yaml
+# (gitignored). Compose merges both automatically.
+# VPS: do NOT create compose.override.yaml — only this file from git.
 services:
   app:
     build:

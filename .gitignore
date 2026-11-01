@@ -56,3 +56,6 @@
 /.env.local
 /.env.*.local
 !/.env.example
+
+# Local Compose overrides (never deploy to VPS)
+/compose.override.yaml

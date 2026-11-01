@@ -1,124 +1,114 @@
 # booking
 
-Symfony booking API and Twig UI. Runs on Docker Compose (app, PostgreSQL, RabbitMQ, worker).
+Symfony booking API and Twig UI. Same Docker stack locally and on the VPS: `app`, `worker`, `db`, `rabbitmq`.
 
-## Requirements (VPS)
+## Development cycle (local ↔ server)
 
-- Linux VPS with about **2 GB RAM**
-- Docker Engine + Docker Compose plugin (`docker compose version`)
-- Git
-- Open inbound port **80** (HTTP). Do not expose Postgres (`5432`) or RabbitMQ management (`15672`) to the public internet.
-
-Install Docker on Ubuntu/Debian if needed:
-
-```bash
-# Official convenience script or your distro packages, then:
-sudo apt-get update
-sudo apt-get install -y docker.io docker-compose-v2
-sudo usermod -aG docker "$USER"
-# log out and back in so the docker group applies
+```text
+PC (Docker Desktop)              GitHub                 VPS (Docker)
+─────────────────────            ──────                 ────────────
+compose.yaml          ──push──►  compose.yaml  ──pull─► compose.yaml
+compose.override.yaml (local only, not in git)
+.env (local secrets)                                    .env (server secrets)
+edit PHP / Twig → refresh                               rebuild image → up -d
 ```
 
-## Deploy after clone
+| | Local PC | VPS |
+|--|----------|-----|
+| Compose files | `compose.yaml` + `compose.override.yaml` | **only** `compose.yaml` |
+| Code | Bind-mounted from your disk (edit → refresh) | Baked into the image on `build` |
+| `APP_ENV` | `dev` | `prod` |
+| HTTP | `http://127.0.0.1:8080` | port `80` (or your `APP_HTTP_PORT`) |
+| DB / Rabbit ports | Published (5432, 5672, 15672) | Not published |
 
-### 1. Clone
+**Rule:** never copy `compose.override.yaml` to the server. It is gitignored on purpose.
 
-```bash
-git clone <YOUR_REPO_URL> booking
-cd booking
-```
+---
 
-### 2. Create environment file
+## Local setup (first time)
+
+1. Install **Docker Desktop** and wait until it is running (`docker version` shows Server).
+2. In the project folder:
 
 ```bash
 cp .env.example .env
-nano .env   # or vim / whatever you use
+cp compose.override.yaml.example compose.override.yaml
 ```
 
-Change at least:
+3. Edit `.env` for local use (example values are fine for a laptop):
 
-| Variable | What to set |
-|----------|-------------|
-| `APP_SECRET` | Long random string (e.g. `openssl rand -hex 32`) |
-| `POSTGRES_PASSWORD` | Strong DB password |
-| `DATABASE_URL` | Same user/password/db as `POSTGRES_*`, host must stay `db` |
-| `RABBITMQ_PASSWORD` | Strong RabbitMQ password |
-| `MESSENGER_TRANSPORT_DSN` | Same RabbitMQ user/password, host `rabbitmq` |
-| `MESSENGER_TRANSPORT_FAILED_DSN` | Same credentials, queue `failed` |
-| `DEFAULT_URI` | `http://YOUR_SERVER_IP` (or domain later) |
-| `APP_HTTP_PORT` | `80` unless you map another host port |
+| Variable | Local suggestion |
+|----------|------------------|
+| `APP_SECRET` | any long random string |
+| `APP_ENV` | `dev` (override also forces `dev`) |
+| `APP_DEBUG` | `1` |
+| `APP_HTTP_PORT` | `8080` |
+| `DEFAULT_URI` | `http://127.0.0.1:8080` |
+| passwords | can stay simple (`booking`) on a laptop |
 
-Keep `APP_ENV=prod` and `APP_DEBUG=0` on the server.
-
-### 3. Build and start
+4. Build and start:
 
 ```bash
 docker compose build
 docker compose up -d
 ```
 
-First build can take several minutes (PHP extensions, Composer).
-
-Check containers:
+5. Check:
 
 ```bash
 docker compose ps
+curl -s http://127.0.0.1:8080/check
 ```
 
-You should see `app`, `worker`, `db`, `rabbitmq` as running / healthy.
+Expected: `{"ok":true}`
 
-### 4. Smoke test
+RabbitMQ UI (local only): http://127.0.0.1:15672 (user/password from `.env`).
+
+### Day-to-day local work
 
 ```bash
-curl -s http://127.0.0.1/check
-# or from your PC: http://YOUR_SERVER_IP/check
-```
+# start
+docker compose up -d
 
-Expected body:
-
-```json
-{"ok":true}
-```
-
-Logs:
-
-```bash
-docker compose logs -f app
-docker compose logs -f worker
-```
-
-The worker runs `messenger:consume async` and may stay quiet until messages exist — that is normal.
-
-### 5. Database migrations
-
-When Doctrine migrations exist in the project:
-
-```bash
-docker compose exec app php bin/console doctrine:migrations:migrate --no-interaction
-```
-
-Until then you can skip this step.
-
-### 6. Useful commands
-
-```bash
-# Shell inside the app container
-docker compose exec app sh
-
-# Symfony console
-docker compose exec app php bin/console debug:router
-
-# Restart after config changes
-docker compose up -d --build
-
-# Stop everything (DB data volume is kept)
+# stop (DB data kept in volume)
 docker compose down
 
-# Stop and remove DB volume (destroys data)
-docker compose down -v
+# logs
+docker compose logs -f app
+docker compose logs -f worker
+
+# Symfony console inside the container
+docker compose exec app php bin/console debug:router
+
+# after composer.json / Dockerfile / docker/* changes
+docker compose build
+docker compose up -d
 ```
 
-### 7. Update the app from git
+Changing PHP/Twig/config under bind-mount usually needs **no rebuild** — refresh the browser.  
+Changing `composer.json` / lock: either rebuild, or:
+
+```bash
+docker compose exec app composer install --ignore-platform-req=ext-amqp
+```
+
+---
+
+## VPS deploy (production)
+
+No `compose.override.yaml` on the server.
+
+```bash
+git clone <YOUR_REPO_URL> booking
+cd booking
+cp .env.example .env
+nano .env   # strong passwords, APP_ENV=prod, APP_DEBUG=0, APP_HTTP_PORT=80, DEFAULT_URI=http://YOUR_IP
+docker compose build
+docker compose up -d
+curl -s http://127.0.0.1/check
+```
+
+### Update after you push from the PC
 
 ```bash
 cd booking
@@ -129,45 +119,46 @@ docker compose up -d
 # docker compose exec app php bin/console doctrine:migrations:migrate --no-interaction
 ```
 
+### Useful on the server
+
+```bash
+docker compose ps
+docker compose logs -f app
+docker compose exec app php bin/console debug:router
+docker compose down          # keep DB volume
+docker compose down -v       # destroy DB volume
+```
+
+Do **not** publish Postgres `5432` or RabbitMQ `15672` to the public internet.
+
+---
+
 ## Services
 
 | Service | Role |
 |---------|------|
-| `app` | nginx + PHP-FPM (HTTP on `APP_HTTP_PORT`) |
-| `worker` | Messenger consumer (`async` transport) |
+| `app` | nginx + PHP-FPM |
+| `worker` | `messenger:consume async` |
 | `db` | PostgreSQL 16 |
-| `rabbitmq` | AMQP broker (management plugin inside the image) |
+| `rabbitmq` | AMQP (+ management plugin in the image) |
 
-Memory limits in `compose.yaml` are tuned for a ~2 GB VPS. Avoid running extra heavy services on the same host.
+Memory limits in `compose.yaml` target a ~2 GB VPS. Local override raises them a bit for Docker Desktop.
 
-## RabbitMQ management UI (optional)
+---
 
-Ports `5672` / `15672` are **not** published by default. To open the UI safely via SSH tunnel from your PC:
+## HTTPS / domain (later)
 
-```bash
-ssh -L 15672:127.0.0.1:15672 user@YOUR_SERVER_IP
-```
+Stack is HTTP only. Later: Caddy/nginx on the host → proxy to `127.0.0.1:80`, set `DEFAULT_URI=https://your.domain`.
 
-Then temporarily publish management in `compose.yaml` only bound to localhost, or `docker compose exec rabbitmq …`. Prefer tunnel + localhost bind; never expose `15672` to `0.0.0.0` on a public VPS.
+---
 
-## HTTPS and domain (later)
+## Files you should know
 
-This stack speaks **HTTP only**. When you have a domain:
-
-1. Point DNS A-record to the VPS.
-2. Install Caddy or nginx **on the host** (or another compose service).
-3. Terminate TLS there and reverse-proxy to `http://127.0.0.1:80` (or the `APP_HTTP_PORT` you chose).
-4. Set `DEFAULT_URI=https://your.domain`.
-
-Until then, use `http://YOUR_SERVER_IP`.
-
-## Local development without Docker
-
-You can still run PHP built-in server for quick checks (`php -S 127.0.0.1:8000 -t public`), but Postgres/RabbitMQ/worker match production only via Compose. On a machine with Docker:
-
-```bash
-cp .env.example .env
-# adjust secrets if you want
-docker compose up -d --build
-curl -s http://127.0.0.1/check
-```
+| File | Role |
+|------|------|
+| `compose.yaml` | Shared stack (what runs on VPS) |
+| `compose.override.yaml.example` | Template for local overrides |
+| `compose.override.yaml` | Your local overrides (not in git) |
+| `Dockerfile` | Image for `app` and `worker` |
+| `.env.example` | Env template |
+| `.env` | Real secrets (not in git) |

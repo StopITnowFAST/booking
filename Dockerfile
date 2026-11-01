@@ -5,12 +5,14 @@ FROM composer:2 AS vendor
 WORKDIR /app
 
 COPY composer.json composer.lock symfony.lock ./
+# ext-amqp is installed in the runtime stage, not in the Composer image.
 RUN composer install \
     --no-dev \
     --no-scripts \
     --no-interaction \
     --prefer-dist \
-    --optimize-autoloader
+    --optimize-autoloader \
+    --ignore-platform-req=ext-amqp
 
 COPY . .
 RUN composer dump-autoload --optimize --classmap-authoritative --no-dev \
@@ -35,9 +37,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /var/www/html
 
+# Composer CLI for local bind-mount workflow (composer install inside the container).
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
 COPY --from=vendor /app /var/www/html
 COPY docker/nginx/default.conf /etc/nginx/sites-available/default
-COPY docker/php/php.ini /usr/local/etc/php/conf.d/app.ini
+COPY docker/php/php.ini /usr/local/etc/php/conf.d/zz-app.ini
+COPY docker/php/php.dev.ini /usr/local/etc/php/conf.d/zz-app.dev.ini.disabled
 COPY docker/app/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \

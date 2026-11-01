@@ -1,0 +1,48 @@
+# Local development overrides.
+# Docker Compose auto-loads compose.override.yaml next to compose.yaml.
+#
+# Setup (once, on your PC only — never copy this to the VPS):
+#   cp compose.override.yaml.example compose.override.yaml
+#
+# Effect:
+#   - same services as production (app, worker, db, rabbitmq)
+#   - source code bind-mounted → edit files locally, refresh browser
+#   - APP_ENV=dev, debug on
+#   - Postgres / RabbitMQ ports on localhost for GUI tools
+#
+# Set in your local .env:
+#   APP_HTTP_PORT=8080
+#   APP_ENV=dev
+#   APP_DEBUG=1
+#   DEFAULT_URI=http://127.0.0.1:8080
+
+services:
+  app:
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+    volumes:
+      - .:/var/www/html
+      - ./docker/nginx/default.conf:/etc/nginx/sites-available/default:ro
+      - ./docker/php/php.dev.ini:/usr/local/etc/php/conf.d/zz-app.ini:ro
+    mem_limit: 512m
+
+  worker:
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+    volumes:
+      - .:/var/www/html
+      - ./docker/php/php.dev.ini:/usr/local/etc/php/conf.d/zz-app.ini:ro
+    mem_limit: 512m
+
+  db:
+    ports:
+      - "5432:5432"
+    mem_limit: 512m
+
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    mem_limit: 512m

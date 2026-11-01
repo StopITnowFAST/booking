@@ -12,6 +12,6 @@ final class CheckController
     #[Route('/check', name: 'check', methods: ['GET'])]
     public function __invoke(): JsonResponse
     {
-        return new JsonResponse(['ok' => true]);
+        return new JsonResponse(['ok' => true, 'status' => 'working']);
     }
 }
